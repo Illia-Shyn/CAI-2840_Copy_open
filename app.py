@@ -7,11 +7,15 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
+import os
 
 
 st.set_page_config(page_title="AI Soccer Analyzer", layout="wide")
 
 st.title("AI Soccer Analyzer")
+
+# --- Constants ---
+TARGET_WIDTH = 1280
 
 # --- Model and Functions ---
 @st.cache_resource
@@ -90,11 +94,16 @@ if selected_video_name:
                 video_path_out = tfile.name
 
                 cap = cv2.VideoCapture(str(selected_video_path))
+                
+                # Calculate new dimensions
+                original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                aspect_ratio = original_height / original_width
+                target_height = int(TARGET_WIDTH * aspect_ratio)
+
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 fps = cap.get(cv2.CAP_PROP_FPS)
-                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                out = cv2.VideoWriter(video_path_out, fourcc, fps, (width, height))
+                out = cv2.VideoWriter(video_path_out, fourcc, fps, (TARGET_WIDTH, target_height))
                 
                 player_positions = []
                 ball_positions = []
@@ -106,7 +115,10 @@ if selected_video_name:
                     if not ret:
                         break
 
-                    results = model.track(frame, persist=True, tracker="botsort.yaml", classes=[0, 32]) # Track person and sports ball
+                    # Resize frame for faster processing
+                    resized_frame = cv2.resize(frame, (TARGET_WIDTH, target_height))
+
+                    results = model.track(resized_frame, persist=True, tracker="botsort.yaml", classes=[0, 32])
                     
                     annotated_frame = results[0].plot()
 
@@ -136,8 +148,13 @@ if selected_video_name:
                 cap.release()
                 out.release()
                 
-                st.video(video_path_out)
+                # Read video bytes for robust display
                 tfile.close()
+                with open(video_path_out, "rb") as f:
+                    video_bytes = f.read()
+                
+                st.video(video_bytes)
+                os.unlink(video_path_out) # Clean up temp file
 
                 st.success("Analysis complete!")
             
@@ -147,7 +164,7 @@ if selected_video_name:
             # Heatmap
             if player_positions:
                 with st.spinner("Generating heatmap..."):
-                    heatmap_fig = generate_heatmap(player_positions, width, height)
+                    heatmap_fig = generate_heatmap(player_positions, TARGET_WIDTH, target_height)
                     if heatmap_fig:
                         st.subheader("Player Position Heatmap")
                         st.pyplot(heatmap_fig, use_container_width=True)
@@ -155,7 +172,7 @@ if selected_video_name:
             # Ball Trajectory
             if ball_positions:
                 with st.spinner("Generating ball trajectory..."):
-                    ball_fig = generate_ball_trajectory(ball_positions, width, height)
+                    ball_fig = generate_ball_trajectory(ball_positions, TARGET_WIDTH, target_height)
                     if ball_fig:
                         st.subheader("Ball Trajectory Map")
                         st.pyplot(ball_fig, use_container_width=True)
