@@ -3,4 +3,5 @@ ultralytics
 opencv-python-headless
 pandas
 seaborn
-matplotlib 
+matplotlib
+lap 
