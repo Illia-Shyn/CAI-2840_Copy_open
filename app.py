@@ -15,7 +15,8 @@ st.set_page_config(page_title="AI Soccer Analyzer", layout="wide")
 st.title("AI Soccer Analyzer")
 
 # --- Constants ---
-TARGET_WIDTH = 1280
+# Lower resolution to 480p for cloud compatibility
+TARGET_WIDTH = 854
 
 # --- Model and Functions ---
 @st.cache_resource
@@ -87,102 +88,96 @@ if selected_video_name:
 
     with col2:
         st.subheader("Analyzed Video")
+        
+        # Placeholder for the video
+        video_display = st.empty()
+
         if st.button("Analyze Video"):
-            # --- Video Processing ---
-            with st.spinner("Analyzing video... This may take a few minutes."):
-                tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
-                video_path_out = tfile.name
+            video_path_out = None
+            try:
+                # --- Video Processing ---
+                with st.spinner("Analyzing video... This will be faster now!"):
+                    tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
+                    video_path_out = tfile.name
+                    tfile.close()
 
-                cap = cv2.VideoCapture(str(selected_video_path))
-                
-                # Calculate new dimensions
-                original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                aspect_ratio = original_height / original_width
-                target_height = int(TARGET_WIDTH * aspect_ratio)
-
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                out = cv2.VideoWriter(video_path_out, fourcc, fps, (TARGET_WIDTH, target_height))
-                
-                player_positions = []
-                ball_positions = []
-                player_counts_over_time = []
-                frame_count = 0
-
-                while cap.isOpened():
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-
-                    # Resize frame for faster processing
-                    resized_frame = cv2.resize(frame, (TARGET_WIDTH, target_height))
-
-                    results = model.track(resized_frame, persist=True, tracker="botsort.yaml", classes=[0, 32])
+                    cap = cv2.VideoCapture(str(selected_video_path))
                     
-                    annotated_frame = results[0].plot()
+                    original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    aspect_ratio = original_height / original_width
+                    target_height = int(TARGET_WIDTH * aspect_ratio)
 
-                    num_players = 0
-                    if results[0].boxes.id is not None:
-                        boxes = results[0].boxes.xywh.cpu().numpy()
-                        classes = results[0].boxes.cls.cpu().numpy()
-                        
-                        player_indices = np.where(classes == 0)[0]
-                        num_players = len(player_indices)
-                        
-                        for i in player_indices:
-                            x_center, y_center, w, h = boxes[i]
-                            player_positions.append((x_center, y_center + h / 2))
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    out = cv2.VideoWriter(video_path_out, fourcc, fps, (TARGET_WIDTH, target_height))
+                    
+                    player_positions = []
+                    ball_positions = []
+                    player_counts_over_time = []
+
+                    while cap.isOpened():
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+
+                        resized_frame = cv2.resize(frame, (TARGET_WIDTH, target_height))
+                        results = model.track(resized_frame, persist=True, tracker="botsort.yaml", classes=[0, 32])
+                        annotated_frame = results[0].plot()
+
+                        num_players = 0
+                        if results[0].boxes.id is not None:
+                            boxes = results[0].boxes.xywh.cpu().numpy()
+                            classes = results[0].boxes.cls.cpu().numpy()
                             
-                        ball_indices = np.where(classes == 32)[0]
-                        if len(ball_indices) > 0:
-                            # Assume one ball, take the first one
-                            x_center, y_center, w, h = boxes[ball_indices[0]]
-                            ball_positions.append((x_center, y_center))
-
+                            player_indices = np.where(classes == 0)[0]
+                            num_players = len(player_indices)
+                            for i in player_indices:
+                                x_center, y_center, w, h = boxes[i]
+                                player_positions.append((x_center, y_center + h / 2))
+                                
+                            ball_indices = np.where(classes == 32)[0]
+                            if len(ball_indices) > 0:
+                                x_center, y_center, w, h = boxes[ball_indices[0]]
+                                ball_positions.append((x_center, y_center))
+                        
+                        player_counts_over_time.append(num_players)
+                        out.write(annotated_frame)
                     
-                    player_counts_over_time.append(num_players)
-                    out.write(annotated_frame)
-                    frame_count += 1
-                
-                cap.release()
-                out.release()
-                
-                # Read video bytes for robust display
-                tfile.close()
-                with open(video_path_out, "rb") as f:
-                    video_bytes = f.read()
-                
-                st.video(video_bytes)
-                os.unlink(video_path_out) # Clean up temp file
+                    cap.release()
+                    out.release()
+                    st.success("Analysis complete!")
 
-                st.success("Analysis complete!")
-            
-            # --- Report Generation ---
-            st.header("Post-Game Analysis Report")
-            
-            # Heatmap
-            if player_positions:
-                with st.spinner("Generating heatmap..."):
-                    heatmap_fig = generate_heatmap(player_positions, TARGET_WIDTH, target_height)
-                    if heatmap_fig:
-                        st.subheader("Player Position Heatmap")
-                        st.pyplot(heatmap_fig, use_container_width=True)
-            
-            # Ball Trajectory
-            if ball_positions:
-                with st.spinner("Generating ball trajectory..."):
-                    ball_fig = generate_ball_trajectory(ball_positions, TARGET_WIDTH, target_height)
-                    if ball_fig:
-                        st.subheader("Ball Trajectory Map")
-                        st.pyplot(ball_fig, use_container_width=True)
+                # --- Display Video ---
+                video_display.video(video_path_out)
+                
+                # --- Report Generation ---
+                st.header("Post-Game Analysis Report")
+                
+                if player_positions:
+                    with st.spinner("Generating heatmap..."):
+                        heatmap_fig = generate_heatmap(player_positions, TARGET_WIDTH, target_height)
+                        if heatmap_fig:
+                            st.subheader("Player Position Heatmap")
+                            st.pyplot(heatmap_fig, use_container_width=True)
+                
+                if ball_positions:
+                    with st.spinner("Generating ball trajectory..."):
+                        ball_fig = generate_ball_trajectory(ball_positions, TARGET_WIDTH, target_height)
+                        if ball_fig:
+                            st.subheader("Ball Trajectory Map")
+                            st.pyplot(ball_fig, use_container_width=True)
 
-            # Player count chart
-            if player_counts_over_time:
-                with st.spinner("Generating player count chart..."):
-                    st.subheader("Player Count Over Time")
-                    chart_data = pd.DataFrame({
-                        "Frame": range(len(player_counts_over_time)),
-                        "Number of Players": player_counts_over_time
-                    }).set_index("Frame")
-                    st.line_chart(chart_data) 
+                if player_counts_over_time:
+                    with st.spinner("Generating player count chart..."):
+                        st.subheader("Player Count Over Time")
+                        chart_data = pd.DataFrame({
+                            "Frame": range(len(player_counts_over_time)),
+                            "Number of Players": player_counts_over_time
+                        }).set_index("Frame")
+                        st.line_chart(chart_data)
+
+            finally:
+                # Clean up the temp file if it exists
+                if video_path_out and os.path.exists(video_path_out):
+                    os.unlink(video_path_out) 
