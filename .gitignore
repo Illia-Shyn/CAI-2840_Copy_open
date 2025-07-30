@@ -1,0 +1,12 @@
+# Ultralytics Model
+yolov8n.pt
+
+# Python virtual environment
+.venv/
+env/
+venv/
+__pycache__/
+
+# IDE folders
+.vscode/
+.idea/ 
